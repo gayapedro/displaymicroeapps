@@ -1,6 +1,8 @@
 .include "./m328Pdef.inc"
 .equ clock = 16000000
-.def temp = R16
+.def aux = R16
+.def delayaux = R17
+.def incremento = R18
 .equ linha1 = 0x00 ;endereço da linha 1 do display
 .equ linha2 = 0x40 ;endereço da linha 2 do display
 ;instruções do lcd
@@ -12,122 +14,145 @@
 .equ resetardisplay = 0b00110000
 .equ modo4bits = 0b00101000
 .equ posicaocursor = 0b10000000
+;pinos do display lcd
 .equ pinoe = PB1
 .equ pinors = PB0
 .equ pino4 = PD4
 .equ pino5 = PD5
 .equ pino6 = PD6
 .equ pino7 = PD7
-
 .org 0x0000
 rjmp setup
-
-string1:
-.db "WASHINGTON 1",0
-string2:
-.db "E PEDRO GAYA 2",0
+.org 0x0008
+rjmp interrupcao
+;letras
+letra_w: .db 0b01010111,0
+letra_a: .db 0b01000001,0
+letra_s: .db 0b01010011,0
+letra_h: .db 0b01001000,0
+letra_i: .db 0b01001001,0
+letra_n: .db 0b01001110,0
+letra_g: .db 0b01000111,0
+letra_t: .db 0b01010100,0
+letra_o: .db 0b01001111,0
+letra_p: .db 0b01010000,0
+letra_e: .db 0b01000101,0
+letra_d: .db 0b01000100,0
+letra_r: .db 0b01010010,0
+letra_espaco: .db 0b00100000,0
+string1: .db "Pedro Gaya",0
+string2: .db "Washington",0
+string3: .db "Soh eu",0
 
 setup:
+    ldi r16, (1<<PCIE1)		
+	sts PCICR, r16
+    ldi r16, (1<<PCIF1)			
+	out PCIFR, r16
+    ldi r16, (1<<PCINT8)
+    sts PCMSK1, r16
+    sei
     ;inicializa topo da pilha
-    ldi temp,low(RAMEND)
-    out SPL,temp
-    ldi temp,high(RAMEND)
-    out SPH,temp
+    ldi aux,low(RAMEND)
+    out SPL,aux
+    ldi aux,high(RAMEND)
+    out SPH,aux
     ;configura portd e portb como output
-    LDI temp,0xFF
-    OUT DDRD,temp
-    OUT DDRB,temp
+    LDI aux,0x00
+    OUT DDRC,aux
+    LDI aux,0xFF
+    OUT DDRD,aux
+    OUT DDRB,aux
+    OUT PORTC,aux
     ;inicializa o lcd
     rcall inicializar
+    ldi incremento,0x00
     ;string1
-    ldi ZH, high(string1)
-    ldi ZL, low(string1)
-    ldi temp, linha1
-    rcall escrevertexto
+    ;ldi ZH, high(string1)
+    ;ldi ZL, low(string1)
+    ;ldi aux, linha1
+    ;rcall escrevertexto
     ;string2
-    ldi ZH, high(string2)
-    ldi ZL, low(string2)
-    ldi temp, linha2
-    rcall escrevertexto
+    ;ldi ZH, high(string2)
+    ;ldi ZL, low(string2)
+    ;ldi aux, linha2
+    ;rcall escrevertexto
 
 main:
     rjmp main
 
 inicializar:
 ;delay de inicialização do display
-    ldi temp, 100                       ; initial 40 mSec delay
-    rcall delayTx1mS
+    ldi delayaux, 100                       ; initial 40 mSec delay
+    rcall delay1mili
 ;configura pinos E e RS
     cbi PORTB, pinors
     cbi PORTB, pinoe
-; Reset the LCD controller.
-    ldi temp, resetardisplay      ; first part of reset sequence
-    rcall lcd_write_4
-    ldi temp, 10                        ; 4.1 mS delay (min)
-    rcall delayTx1mS
+;configura o lcd para o uso: 3 instruções de reset, duas de modo 4 bits, uma de desligar, uma de limpar, uma de enviar dados e uma de ligar
+    ldi aux, resetardisplay      ; first part of reset sequence
+    rcall escreverdados
+    ldi delayaux, 10                        ; 4.1 mS delay (min)
+    rcall delay1mili
 
-    ldi temp, resetardisplay         ; second part of reset sequence
-    rcall lcd_write_4
-    ldi temp, 200                       ; 100 uS delay (min)
-    rcall delayTx1uS
+    ldi aux, resetardisplay         ; second part of reset sequence
+    rcall escreverdados
+    ldi delayaux,200          ; Enable pin high
+    rcall delay1micro 
 
-    ldi temp, resetardisplay         ; third part of reset sequence
-    rcall lcd_write_4
-    ldi temp, 200                       ; this delay is omitted in the data sheet
-    rcall delayTx1uS
+    ldi aux, resetardisplay         ; third part of reset sequence
+    rcall escreverdados
+    ldi delayaux, 200         ; Enable pin high
+    rcall delay1micro 
 
-    ldi temp, modo4bits       ; set 4-bit mode
-    rcall lcd_write_4
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
-; Function Set instruction
-    ldi temp, modo4bits      ; set mode, lines, and font
-    rcall lcd_write_instruction_4d
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
-; The next three instructions are specified in the data sheet as part of the initialization routine,
-;   so it is a good idea (but probably not necessary) to do them just as specified and then redo them
-;   later if the application requires a different configuration.
-; Display On/Off Control instruction
-    ldi temp, desligardisplay           ; turn display OFF
-    rcall lcd_write_instruction_4d
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
-; Clear Display instruction
-    ldi temp, limpar                ; clear display RAM
-    rcall lcd_write_instruction_4d
-    ldi temp, 4                         ; 1.64 mS delay (min)
-    rcall delayTx1mS
-; Entry Mode Set instruction
-    ldi temp, modoentrada           ; set desired shift characteristics
-    rcall lcd_write_instruction_4d
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
-; Display On/Off Control instruction
-    ldi temp, ligardisplay             ; turn the display ON
-    rcall lcd_write_instruction_4d
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
+    ldi aux, modo4bits       ; set 4-bit mode
+    rcall escreverdados
+    ldi delayaux, 80         ; Enable pin high
+    rcall delay1micro 
+
+    ldi aux, modo4bits      ; set mode, lines, and font
+    rcall escreverinstrucao
+    ldi delayaux, 80         ; Enable pin high
+    rcall delay1micro 
+
+    ldi aux, desligardisplay           ; turn display OFF
+    rcall escreverinstrucao
+    ldi delayaux, 80         ; Enable pin high
+    rcall delay1micro 
+
+    ldi aux, limpar                ; clear display RAM
+    rcall escreverinstrucao
+    ldi delayaux, 4                         ; 1.64 mS delay (min)
+    rcall delay1mili
+
+    ldi aux, modoentrada           ; set desired shift characteristics
+    rcall escreverinstrucao
+    ldi delayaux, 80         ; Enable pin high
+    rcall delay1micro 
+
+    ldi aux, ligardisplay             ; turn the display ON
+    rcall escreverinstrucao
+    ldi delayaux, 80         ; Enable pin high
+    rcall delay1micro 
     ret
 
 escrevertexto:
-    push ZH                              ; preserve pointer registers
+    push ZH              
     push ZL
-    lsl ZL                              ; shift the pointer one bit left for the lpm instruction
+    lsl ZL                         
     rol ZH
-    ori temp, posicaocursor          ; convert the plain address to a set cursor instruction
-    rcall lcd_write_instruction_4d         ; set up the first DDRAM address
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
+    ori aux, posicaocursor    
+    rcall escreverinstrucao       
+    ldi delayaux, 80  
+    rcall delay1micro 
 
 escrevertexto_loop:
     ;fica em loop até que não existam mais caracteres no string a ser escrito
-    lpm temp, Z+ ;pega um caractere
-    cpi temp,  0
+    lpm aux, Z+ ;pega um caractere
+    cpi aux,  0
     breq escrevertexto_finalizado
     rcall escrevercaractere
-    ldi temp, 80                        ; 40 uS delay (min)
-    rcall delayTx1uS
+    ldi delayaux, 80 
+    rcall delay1micro 
     rjmp escrevertexto_loop
 
 escrevertexto_finalizado:
@@ -138,62 +163,65 @@ escrevertexto_finalizado:
 escrevercaractere:
     sbi PORTB, pinors        ; select the Data Register (RS high)
     cbi PORTB, pinoe        ; make sure E is initially low
-    rcall lcd_write_4                     ; write the upper 4-bits of the data
-    swap temp                            ; swap high and low nibbles
-    rcall lcd_write_4                     ; write the lower 4-bits of the data
+    rcall escreverdados                     ; write the upper 4-bits of the data
+    swap aux                            ; swap high and low nibbles
+    rcall escreverdados                     ; write the lower 4-bits of the data
     ret
 
-lcd_write_instruction_4d:
+escreverinstrucao:
     cbi PORTB, pinors         ; select the Instruction Register (RS low)
     cbi PORTB, pinoe           ; make sure E is initially low
-    rcall lcd_write_4                     ; write the upper 4-bits of the instruction
-    swap temp                            ; swap high and low nibbles
-    rcall lcd_write_4                     ; write the lower 4-bits of the instruction
+    rcall escreverdados                     ; write the upper 4-bits of the instruction
+    swap aux                            ; swap high and low nibbles
+    rcall escreverdados                     ; write the lower 4-bits of the instruction
     ret
 
-lcd_write_4:
-    out PORTD, temp
-    sbi PORTB, pinoe          ; Enable pin high
-    rcall delay1uS                        ; implement 'Data set-up time' (80 nS) and 'Enable pulse width' (230 nS)
+escreverdados:
+    out PORTD, aux
+    sbi PORTB, pinoe
+    ldi delayaux,1          ; Enable pin high
+    rcall delay1micro                       ; implement 'Data set-up time' (80 nS) and 'Enable pulse width' (230 nS)
     cbi PORTB, pinoe           ; Enable pin low
-    rcall delay1uS                        ; implement 'Data hold time' (10 nS) and 'Enable cycle time' (500 nS)
+    ldi delayaux,1          ; Enable pin high
+    rcall delay1micro                       ; implement 'Data hold time' (10 nS) and 'Enable cycle time' (500 nS)
     ret
 
-delayYx1mS:
-    rcall delay1mS                        ; delay for 1 mS
-    sbiw YH:YL, 1                        ; update the the delay counter
-    brne delayYx1mS                      ; counter is not zero
-    ret
-
-delayTx1mS:
-    rcall delay1mS                        ; delay for 1 mS
-    dec temp                            ; update the delay counter
-    brne delayTx1mS                      ; counter is not zero
-    ret
-
-delay1mS:
+delay1mili:
     push YL                              ; [2] preserve registers
     push YH                              ; [2]
     ldi YL, low (((clock/1000)-18)/4)    ; [1] delay counter
     ldi YH, high(((clock/1000)-18)/4)    ; [1]
-
-delay1mS_01:
+    delayloop:
     sbiw YH:YL, 1                        ; [2] update the the delay counter
-    brne delay1mS_01                     ; [2] delay counter is not zero
+    brne delayloop                    ; [2] delay counter is not zero
     pop YH                              ; [2] restore registers
-    pop YL                              ; [2]
-    ret                                     ; [4]
-
-delayTx1uS:
-    rcall delay1uS                        ; delay for 1 uS
-    dec temp                            ; decrement the delay counter
-    brne delayTx1uS                      ; counter is not zero
+    pop YL                       ; delay for 1 mS
+    dec delayaux                            ; update the delay counter
+    brne delay1mili                      ; counter is not zero
     ret
 
-delay1uS:
-    push temp                            ; [2] these instructions do nothing except consume clock cycles
-    pop temp                            ; [2]
-    push temp                            ; [2]
-    pop temp                            ; [2]
-    ret                                     ; [4]
-        
+delay1micro:
+    push delayaux                     
+    pop delayaux                            
+    push delayaux                          
+    pop delayaux                       ; delay for 1 uS
+    dec delayaux                            ; decrement the delay counter
+    brne delay1micro                      ; counter is not zero
+    ret
+
+interrupcao:
+    cpi incremento, 16
+    breq trocalinha
+    rjmp continua
+    trocalinha:
+    ldi incremento,0x40
+    continua:
+    mov aux,incremento
+    ldi ZH, high(letra_o)
+    ldi ZL, low(letra_o)
+    rcall escrevertexto
+    ldi delayaux,100
+    rcall delay1mili
+    inc incremento
+    reti
+
