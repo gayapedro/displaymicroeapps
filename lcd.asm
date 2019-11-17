@@ -28,9 +28,9 @@ letra_infinito: .db 0b11110011,0
 configuracao:
     ;interrupcao
     ldi r16, (1<<PCIE1)		
-	sts PCICR, r16
+    sts PCICR, r16
     ldi r16, (1<<PCIF1)			
-	out PCIFR, r16
+    out PCIFR, r16
     ldi r16, (1<<PCINT8)
     sts PCMSK1, r16
     sei
@@ -54,7 +54,7 @@ main:
 
 inicializar:
 ;delay de inicialização do display
-    ldi delayaux, 100                       ; initial 40 mSec delay
+    ldi delayaux, 100              
     rcall delay1mili
 ;configura pinos E e RS
     cbi PORTD, pinors
